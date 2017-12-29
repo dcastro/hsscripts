@@ -1,10 +1,8 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Lib where
 
 import System.Process (readCreateProcessWithExitCode, proc, cwd)
-import GHC.Generics (Generic)
 import Data.Yaml (FromJSON, Value(..), (.:))
 import qualified Data.Yaml as Y
 import qualified Data.ByteString.Char8 as BS
@@ -17,7 +15,7 @@ stackDir = "/Users/dcastro/.local/bin/stack"
 -- wd = "/Users/dcastro/Dropbox/Projects/Haskell/halive"
 wd = "/Users/dcastro/Dropbox/Projects/Haskell/haskell-ide-engine"
 
-stackQuery :: IO [Component]
+stackQuery :: IO [CabalFile]
 stackQuery = 
   do
     (exitCode, stdout, stderr) <- readCreateProcessWithExitCode process ""
@@ -26,42 +24,30 @@ stackQuery =
       ExitFailure _ -> die ("`stack query` failed:\n" ++ stderr)
       ExitSuccess   -> pure ()
 
-    case decodeComponents stdout of
-      Right cs -> pure cs
-      Left err -> die ("Could not parse response from `stack query`:\n" ++ err)
+    case Y.decodeEither (BS.pack stdout) of
+      Right (StackQuery files)  -> pure files
+      Left err                  -> die ("Could not parse response from `stack query`:\n" ++ err)
   where
     process = (proc stackDir ["query"]) { cwd = Just wd }
 
-
-decodeComponents :: String -> Either String [Component]
-decodeComponents s = 
-  let resultOpt = Y.decodeEither (BS.pack s) :: Either String Result
-  in  components . locals <$> resultOpt
-
-newtype Result = Result
-  { locals :: Locals
+newtype StackQuery = StackQuery
+  { cabalFiles :: [CabalFile]
   }
-  deriving (Generic, Show)
-
-newtype Locals = Locals { components :: [Component] }
   deriving Show
 
-data Component = Component
+data CabalFile = CabalFile
   { name :: Text
   , path :: Text
-  , version :: Text
   }
   deriving Show
 
-instance FromJSON Result
-
-instance FromJSON Locals where
+instance FromJSON StackQuery where
   parseJSON (Object o) = 
-    let pairs = HM.toList o
-        parseComponent (k, Object v) = Component k <$> v .: "path" <*> v .: "version"
-    in  Locals <$> traverse parseComponent pairs
+    let parseCabalFile (k, Object v) = CabalFile k <$> v .: "path"
+    in
+      do 
+        Object locals <- o .: "locals"
+        files         <- traverse parseCabalFile $ HM.toList locals
+        pure $ StackQuery files
   parseJSON _ = fail "Expected Object for Locals value"
-
-
-
 

@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Lib where
+module DirectDeps where
 
 import System.Process (readCreateProcessWithExitCode, proc, cwd)
 import Data.Yaml (FromJSON, Value(..), (.:))

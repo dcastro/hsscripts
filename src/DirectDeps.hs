@@ -8,10 +8,13 @@
   --package bytestring
   --package unordered-containers
   --package text
+  --package filepath
 -}
 
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
+
 
 module DirectDeps where
 
@@ -20,13 +23,34 @@ import Data.Yaml (FromJSON, Value(..), (.:))
 import qualified Data.Yaml as Y
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.HashMap.Strict as HM
+import qualified Data.Text as T
 import Data.Text (Text)
 import System.Environment (getArgs)
 import System.Exit (die, ExitCode(..))
 import Data.List (isPrefixOf)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, maybeToList)
+import System.FilePath ((</>), (<.>))
+import qualified Distribution.Package as P
+import qualified Distribution.PackageDescription as P
+import qualified Distribution.PackageDescription.Parse as P
+import qualified Distribution.Verbosity as P
+import qualified Distribution.Types.UnqualComponentName as P
 
 -- "/Users/dcastro/Dropbox/Projects/Haskell/haskell-ide-engine"
+
+data Package = Package
+  { packageName :: String
+  , components :: [(Component, [P.Dependency])]
+  }
+
+type ComponentName = String
+type DependsOnLib = Bool
+
+data Component
+  = Lib
+  | Exe   ComponentName DependsOnLib
+  | Test  ComponentName DependsOnLib
+  | Bench ComponentName DependsOnLib
 
 main :: IO ()
 main = do
@@ -35,8 +59,35 @@ main = do
                 Just args -> pure args
                 Nothing -> die usage
   cabalFiles <- stackQuery projPath stackPath
-  print cabalFiles
+  packageDescriptions <- traverse readGenericPackageDescriptionFromFile cabalFiles
+  let packages = fmap parsePackage packageDescriptions
   pure ()
+
+parsePackage :: P.GenericPackageDescription -> Package
+parsePackage gpd =
+  let pkgName = P.unPackageName $ P.pkgName $ P.package $ P.packageDescription gpd
+      lib     = (Lib, ) . P.condTreeConstraints <$> P.condLibrary gpd
+      exes    = parseComponent Exe   pkgName <$> P.condExecutables gpd
+      tests   = parseComponent Test  pkgName <$> P.condTestSuites gpd
+      benches = parseComponent Bench pkgName <$> P.condBenchmarks gpd
+      components = maybeToList lib ++ exes ++ tests ++ benches
+  in  Package { packageName = pkgName, components = components }
+
+parseComponent
+  :: (ComponentName -> DependsOnLib -> a)
+  -> String
+  -> (P.UnqualComponentName, P.CondTree b [P.Dependency] c)
+  -> (a, [P.Dependency])
+parseComponent mkComponent pkgName (compName, condTree) =
+  let compName'     = P.unUnqualComponentName compName
+      deps          = P.condTreeConstraints condTree
+      dependsOnLib  = any (\d -> P.unPackageName (P.depPkgName d) == pkgName) deps
+  in  (mkComponent compName' dependsOnLib, deps)
+
+readGenericPackageDescriptionFromFile :: CabalFile -> IO P.GenericPackageDescription
+readGenericPackageDescriptionFromFile cf = P.readGenericPackageDescription P.normal fullPath
+  where
+    fullPath = T.unpack (path cf) </> T.unpack (name cf) <.> "cabal"
 
 type ProjectPath = String
 type StackPath = String
@@ -73,9 +124,7 @@ stackQuery projPath stackPath =
   where
     process = (proc stackPath ["query"]) { cwd = Just projPath }
 
-newtype StackQuery = StackQuery
-  { cabalFiles :: [CabalFile]
-  }
+newtype StackQuery = StackQuery [CabalFile]
   deriving Show
 
 data CabalFile = CabalFile

@@ -1,3 +1,4 @@
 .stack-work/
 hsscripts.cabal
 *~
+\.DS_Store

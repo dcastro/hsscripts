@@ -1,4 +1,17 @@
+#!/usr/bin/env stack
+{- stack
+  script
+  --resolver lts-10.1
+  --package Cabal
+  --package yaml
+  --package process
+  --package bytestring
+  --package unordered-containers
+  --package text
+-}
+
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 
 module DirectDeps where
 
@@ -8,15 +21,45 @@ import qualified Data.Yaml as Y
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.HashMap.Strict as HM
 import Data.Text (Text)
+import System.Environment (getArgs)
 import System.Exit (die, ExitCode(..))
+import Data.List (isPrefixOf)
+import Data.Maybe (fromMaybe)
 
-stackDir, wd :: String
-stackDir = "/Users/dcastro/.local/bin/stack"
--- wd = "/Users/dcastro/Dropbox/Projects/Haskell/halive"
-wd = "/Users/dcastro/Dropbox/Projects/Haskell/haskell-ide-engine"
+-- "/Users/dcastro/Dropbox/Projects/Haskell/haskell-ide-engine"
 
-stackQuery :: IO [CabalFile]
-stackQuery = 
+main :: IO ()
+main = do
+  argsOpt <- parseArgs <$> getArgs
+  (projPath, stackPath) <- case argsOpt of
+                Just args -> pure args
+                Nothing -> die usage
+  cabalFiles <- stackQuery projPath stackPath
+  print cabalFiles
+  pure ()
+
+type ProjectPath = String
+type StackPath = String
+
+parseArgs :: [String] -> Maybe (ProjectPath, StackPath)
+parseArgs args =
+  go args (Nothing, Nothing) >>= \case
+    (Nothing, _) -> Nothing
+    (Just projPath, stackPathOpt) -> Just (projPath, fromMaybe "stack" stackPathOpt)
+  where
+    go :: [String] -> (Maybe ProjectPath, Maybe StackPath) -> Maybe (Maybe ProjectPath, Maybe StackPath)
+    go [] paths = Just paths
+    go (stackFlag : stackPath : xs) (projPathOpt, _)
+      | stackFlag == "-s" || stackFlag == "--stack-path" = go xs (projPathOpt, Just stackPath)
+    go (unrecognizedFlag : _) _
+      | "-" `isPrefixOf` unrecognizedFlag  = Nothing
+    go (projPath : xs) (_, stackPathOpt) = go xs (Just projPath, stackPathOpt)
+
+usage :: String
+usage = "Usage: stack DirectDeps.hs <project-path> [-s|--stack-path <stack-path>]"
+
+stackQuery :: ProjectPath -> StackPath -> IO [CabalFile]
+stackQuery projPath stackPath = 
   do
     (exitCode, stdout, stderr) <- readCreateProcessWithExitCode process ""
     
@@ -28,7 +71,7 @@ stackQuery =
       Right (StackQuery files)  -> pure files
       Left err                  -> die ("Could not parse response from `stack query`:\n" ++ err)
   where
-    process = (proc stackDir ["query"]) { cwd = Just wd }
+    process = (proc stackPath ["query"]) { cwd = Just projPath }
 
 newtype StackQuery = StackQuery
   { cabalFiles :: [CabalFile]

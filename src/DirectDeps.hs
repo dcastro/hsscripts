@@ -19,27 +19,27 @@
 
 module DirectDeps where
 
-import System.Process (readCreateProcessWithExitCode, proc, cwd)
-import qualified Data.Yaml as Y
-import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Lazy.Char8 as BSL
-import qualified Data.HashMap.Strict as HM
-import qualified Data.Text as T
-import Data.Text (Text)
+import Data.Aeson         (FromJSON, ToJSON, Value(..), (.:), (.=), withObject, toJSON, object)
+import Data.List          (isPrefixOf)
+import Data.Maybe         (fromMaybe, maybeToList)
+import Data.Text          (Text)
+import Data.Vector        (fromList)
 import System.Environment (getArgs)
-import System.Exit (die, ExitCode(..))
-import Data.List (isPrefixOf)
-import Data.Maybe (fromMaybe, maybeToList)
-import System.FilePath ((</>), (<.>))
-import qualified Distribution.Package as P
-import qualified Distribution.PackageDescription as P
-import qualified Distribution.PackageDescription.Parse as P
-import qualified Distribution.Verbosity as P
-import qualified Distribution.Types.UnqualComponentName as P
+import System.Exit        (die, ExitCode(..))
+import System.FilePath    ((</>), (<.>))
+import System.Process     (readCreateProcessWithExitCode, proc, cwd)
 
-import Data.Aeson (FromJSON, ToJSON, Value(..), (.:), (.=), withObject, toJSON, object)
-import qualified Data.Aeson as J
-import Data.Vector (fromList)
+import qualified Data.Aeson                             as J
+import qualified Data.ByteString.Char8                  as BS
+import qualified Data.ByteString.Lazy.Char8             as BSL
+import qualified Data.HashMap.Strict                    as HM
+import qualified Data.Text                              as T
+import qualified Data.Yaml                              as Y
+import qualified Distribution.Package                   as P
+import qualified Distribution.PackageDescription        as P
+import qualified Distribution.PackageDescription.Parse  as P
+import qualified Distribution.Verbosity                 as P
+import qualified Distribution.Types.UnqualComponentName as P
 
 data Package = Package
   { packageName :: String

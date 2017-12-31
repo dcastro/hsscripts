@@ -15,7 +15,6 @@
 
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TupleSections #-}
 
 module DirectDeps where
 
@@ -59,12 +58,12 @@ main = do
 
 data Package = Package
   { packageName :: String
-  , packageComponents :: [(Component, [P.Dependency])]
+  , packageComponents :: [Component]
   }
 
 data Component
-  = Lib
-  | Other ComponentType ComponentName DependsOnLib
+  = Lib [P.Dependency]
+  | Other ComponentType ComponentName DependsOnLib [P.Dependency]
 
 type ComponentName = String
 type DependsOnLib = Bool
@@ -77,17 +76,17 @@ instance ToJSON Package where
       , "components" .= fromList (map encodeComponent components)
       ]
     where
-      encodeComponent (component, deps) = 
-        case component of
-          Lib -> object
-            [ "target"  .= pkgName
-            , "deps"    .= fromList (map encodeDep deps)
-            ]
-          Other ctype cname dependsOnLib -> object
-            [ "target"        .= (pkgName ++ ":" ++ encodeCtype ctype ++ ":"  ++ cname)
-            , "dependsOnLib"  .= dependsOnLib
-            , "deps"          .= fromList (map encodeDep deps)
-            ]
+      encodeComponent (Lib deps) =
+        object
+          [ "target"  .= pkgName
+          , "deps"    .= fromList (map encodeDep deps)
+          ]
+      encodeComponent (Other ctype cname dependsOnLib deps) =
+        object
+          [ "target"        .= (pkgName ++ ":" ++ encodeCtype ctype ++ ":"  ++ cname)
+          , "dependsOnLib"  .= dependsOnLib
+          , "deps"          .= fromList (map encodeDep deps)
+          ]
       encodeDep = toJSON . P.unPackageName . P.depPkgName
       encodeCtype Exe   = "exe"
       encodeCtype Test  = "test"
@@ -101,7 +100,7 @@ readGenericPackageDescriptionFromFile cf = P.readGenericPackageDescription P.nor
 parsePackage :: P.GenericPackageDescription -> Package
 parsePackage gpd =
   let pkgName = P.unPackageName $ P.pkgName $ P.package $ P.packageDescription gpd
-      lib     = (Lib, ) . P.condTreeConstraints <$> P.condLibrary gpd
+      lib     = Lib . P.condTreeConstraints <$> P.condLibrary gpd
       exes    = parseComponent Exe   pkgName <$> P.condExecutables gpd
       tests   = parseComponent Test  pkgName <$> P.condTestSuites gpd
       benches = parseComponent Bench pkgName <$> P.condBenchmarks gpd
@@ -112,12 +111,12 @@ parseComponent
   :: ComponentType
   -> String
   -> (P.UnqualComponentName, P.CondTree b [P.Dependency] c)
-  -> (Component, [P.Dependency])
+  -> Component
 parseComponent componentType pkgName (compName, condTree) =
   let compName'     = P.unUnqualComponentName compName
       deps          = P.condTreeConstraints condTree
       dependsOnLib  = any (\d -> P.unPackageName (P.depPkgName d) == pkgName) deps
-  in  (Other componentType compName' dependsOnLib, deps)
+  in  Other componentType compName' dependsOnLib deps
 
 -------------------------------------------------------------------
 -- parse command line args

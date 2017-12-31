@@ -38,8 +38,24 @@ import qualified Data.Yaml                              as Y
 import qualified Distribution.Package                   as P
 import qualified Distribution.PackageDescription        as P
 import qualified Distribution.PackageDescription.Parse  as P
-import qualified Distribution.Verbosity                 as P
 import qualified Distribution.Types.UnqualComponentName as P
+import qualified Distribution.Verbosity                 as P
+
+main :: IO ()
+main = do
+  argsOpt <- parseArgs <$> getArgs
+  (projPath, stackPath) <- case argsOpt of
+                Just args -> pure args
+                Nothing -> die usage
+  cabalFiles <- stackQuery projPath stackPath
+  packageDescriptions <- traverse readGenericPackageDescriptionFromFile cabalFiles
+  let packages = fmap parsePackage packageDescriptions
+  putStrLn $ BSL.unpack $ J.encode packages
+  pure ()
+
+-------------------------------------------------------------------
+-- parse cabal files
+-------------------------------------------------------------------
 
 data Package = Package
   { packageName :: String
@@ -68,7 +84,7 @@ instance ToJSON Package where
             , "deps"    .= fromList (map encodeDep deps)
             ]
           Other ctype cname dependsOnLib -> object
-            [ "target"        .= (pkgName ++ ":" ++ (encodeCtype ctype) ++ ":"  ++ cname)
+            [ "target"        .= (pkgName ++ ":" ++ encodeCtype ctype ++ ":"  ++ cname)
             , "dependsOnLib"  .= dependsOnLib
             , "deps"          .= fromList (map encodeDep deps)
             ]
@@ -76,19 +92,12 @@ instance ToJSON Package where
       encodeCtype Exe   = "exe"
       encodeCtype Test  = "test"
       encodeCtype Bench = "bench"
-        
-main :: IO ()
-main = do
-  argsOpt <- parseArgs <$> getArgs
-  (projPath, stackPath) <- case argsOpt of
-                Just args -> pure args
-                Nothing -> die usage
-  cabalFiles <- stackQuery projPath stackPath
-  packageDescriptions <- traverse readGenericPackageDescriptionFromFile cabalFiles
-  let packages = fmap parsePackage packageDescriptions
-  putStrLn $ BSL.unpack $ J.encode packages
-  pure ()
-
+      
+readGenericPackageDescriptionFromFile :: CabalFile -> IO P.GenericPackageDescription
+readGenericPackageDescriptionFromFile cf = P.readGenericPackageDescription P.normal fullPath
+  where
+    fullPath = T.unpack (path cf) </> T.unpack (name cf) <.> "cabal"
+    
 parsePackage :: P.GenericPackageDescription -> Package
 parsePackage gpd =
   let pkgName = P.unPackageName $ P.pkgName $ P.package $ P.packageDescription gpd
@@ -110,10 +119,9 @@ parseComponent componentType pkgName (compName, condTree) =
       dependsOnLib  = any (\d -> P.unPackageName (P.depPkgName d) == pkgName) deps
   in  (Other componentType compName' dependsOnLib, deps)
 
-readGenericPackageDescriptionFromFile :: CabalFile -> IO P.GenericPackageDescription
-readGenericPackageDescriptionFromFile cf = P.readGenericPackageDescription P.normal fullPath
-  where
-    fullPath = T.unpack (path cf) </> T.unpack (name cf) <.> "cabal"
+-------------------------------------------------------------------
+-- parse command line args
+-------------------------------------------------------------------
 
 type ProjectPath = String
 type StackPath = String
@@ -134,6 +142,10 @@ parseArgs args =
 
 usage :: String
 usage = "Usage: stack DirectDeps.hs <project-path> [-s|--stack-path <stack-path>]"
+
+-------------------------------------------------------------------
+-- `stack query`
+-------------------------------------------------------------------
 
 stackQuery :: ProjectPath -> StackPath -> IO [CabalFile]
 stackQuery projPath stackPath = 

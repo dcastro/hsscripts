@@ -17,7 +17,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
 
-
 module DirectDeps where
 
 import System.Process (readCreateProcessWithExitCode, proc, cwd)
@@ -42,36 +41,41 @@ import Data.Aeson (FromJSON, ToJSON, Value(..), (.:), (.=), withObject, toJSON, 
 import qualified Data.Aeson as J
 import Data.Vector (fromList)
 
--- "/Users/dcastro/Dropbox/Projects/Haskell/haskell-ide-engine"
-
 data Package = Package
   { packageName :: String
   , packageComponents :: [(Component, [P.Dependency])]
   }
 
-type ComponentName = String
-type DependsOnLib = Bool
-
 data Component
   = Lib
-  | Exe   ComponentName DependsOnLib
-  | Test  ComponentName DependsOnLib
-  | Bench ComponentName DependsOnLib
+  | Other ComponentType ComponentName DependsOnLib
+
+type ComponentName = String
+type DependsOnLib = Bool
+data ComponentType = Exe | Test | Bench
 
 instance ToJSON Package where
   toJSON (Package pkgName components) = 
     object
       [ "packageName" .= pkgName
-      , "components" .= fromList (map encode components)
+      , "components" .= fromList (map encodeComponent components)
       ]
     where
-      encode (component, deps) = 
+      encodeComponent (component, deps) = 
         case component of
-          Lib                      ->  object [ "deps" .= fromList (map encodeDep deps), "target" .= pkgName]
-          Exe   cname dependsOnLib ->  object [ "deps" .= fromList (map encodeDep deps), "dependsOnLib" .= dependsOnLib, "target" .= (pkgName ++ ":exe:"  ++ cname) ]
-          Test  cname dependsOnLib ->  object [ "deps" .= fromList (map encodeDep deps), "dependsOnLib" .= dependsOnLib, "target" .= (pkgName ++ ":test:" ++ cname) ]
-          Bench cname dependsOnLib ->  object [ "deps" .= fromList (map encodeDep deps), "dependsOnLib" .= dependsOnLib, "target" .= (pkgName ++ ":test:" ++ cname) ]
+          Lib -> object
+            [ "target"  .= pkgName
+            , "deps"    .= fromList (map encodeDep deps)
+            ]
+          Other ctype cname dependsOnLib -> object
+            [ "target"        .= (pkgName ++ ":" ++ (encodeCtype ctype) ++ ":"  ++ cname)
+            , "dependsOnLib"  .= dependsOnLib
+            , "deps"          .= fromList (map encodeDep deps)
+            ]
       encodeDep = toJSON . P.unPackageName . P.depPkgName
+      encodeCtype Exe   = "exe"
+      encodeCtype Test  = "test"
+      encodeCtype Bench = "bench"
         
 main :: IO ()
 main = do
@@ -93,18 +97,18 @@ parsePackage gpd =
       tests   = parseComponent Test  pkgName <$> P.condTestSuites gpd
       benches = parseComponent Bench pkgName <$> P.condBenchmarks gpd
       components = maybeToList lib ++ exes ++ tests ++ benches
-  in  Package { packageName = pkgName, packageComponents = components }
+  in  Package pkgName components
 
 parseComponent
-  :: (ComponentName -> DependsOnLib -> a)
+  :: ComponentType
   -> String
   -> (P.UnqualComponentName, P.CondTree b [P.Dependency] c)
-  -> (a, [P.Dependency])
-parseComponent mkComponent pkgName (compName, condTree) =
+  -> (Component, [P.Dependency])
+parseComponent componentType pkgName (compName, condTree) =
   let compName'     = P.unUnqualComponentName compName
       deps          = P.condTreeConstraints condTree
       dependsOnLib  = any (\d -> P.unPackageName (P.depPkgName d) == pkgName) deps
-  in  (mkComponent compName' dependsOnLib, deps)
+  in  (Other componentType compName' dependsOnLib, deps)
 
 readGenericPackageDescriptionFromFile :: CabalFile -> IO P.GenericPackageDescription
 readGenericPackageDescriptionFromFile cf = P.readGenericPackageDescription P.normal fullPath

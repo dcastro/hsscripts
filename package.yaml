@@ -32,7 +32,8 @@ library:
     - bytestring
     - unordered-containers
     - filepath
-
+    - aeson
+    - vector
 executables:
   hsscripts-exe:
     main:                Main.hs

@@ -9,6 +9,8 @@
   --package unordered-containers
   --package text
   --package filepath
+  --package aeson
+  --package vector
 -}
 
 {-# LANGUAGE OverloadedStrings #-}
@@ -19,9 +21,9 @@
 module DirectDeps where
 
 import System.Process (readCreateProcessWithExitCode, proc, cwd)
-import Data.Yaml (FromJSON, Value(..), (.:))
 import qualified Data.Yaml as Y
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as T
 import Data.Text (Text)
@@ -36,11 +38,15 @@ import qualified Distribution.PackageDescription.Parse as P
 import qualified Distribution.Verbosity as P
 import qualified Distribution.Types.UnqualComponentName as P
 
+import Data.Aeson (FromJSON, ToJSON, Value(..), (.:), (.=), withObject, toJSON, object)
+import qualified Data.Aeson as J
+import Data.Vector (fromList)
+
 -- "/Users/dcastro/Dropbox/Projects/Haskell/haskell-ide-engine"
 
 data Package = Package
   { packageName :: String
-  , components :: [(Component, [P.Dependency])]
+  , packageComponents :: [(Component, [P.Dependency])]
   }
 
 type ComponentName = String
@@ -52,6 +58,21 @@ data Component
   | Test  ComponentName DependsOnLib
   | Bench ComponentName DependsOnLib
 
+instance ToJSON Package where
+  toJSON (Package pkgName components) = 
+    object
+      [ "packageName" .= pkgName
+      , "components" .= fromList (map encode components)
+      ]
+    where
+      encode (component, deps) = 
+        case component of
+          Lib                      ->  object [ "deps" .= fromList (map encodeDep deps), "target" .= pkgName]
+          Exe   cname dependsOnLib ->  object [ "deps" .= fromList (map encodeDep deps), "dependsOnLib" .= dependsOnLib, "target" .= (pkgName ++ ":exe:"  ++ cname) ]
+          Test  cname dependsOnLib ->  object [ "deps" .= fromList (map encodeDep deps), "dependsOnLib" .= dependsOnLib, "target" .= (pkgName ++ ":test:" ++ cname) ]
+          Bench cname dependsOnLib ->  object [ "deps" .= fromList (map encodeDep deps), "dependsOnLib" .= dependsOnLib, "target" .= (pkgName ++ ":test:" ++ cname) ]
+      encodeDep = toJSON . P.unPackageName . P.depPkgName
+        
 main :: IO ()
 main = do
   argsOpt <- parseArgs <$> getArgs
@@ -61,6 +82,7 @@ main = do
   cabalFiles <- stackQuery projPath stackPath
   packageDescriptions <- traverse readGenericPackageDescriptionFromFile cabalFiles
   let packages = fmap parsePackage packageDescriptions
+  putStrLn $ BSL.unpack $ J.encode packages
   pure ()
 
 parsePackage :: P.GenericPackageDescription -> Package
@@ -71,7 +93,7 @@ parsePackage gpd =
       tests   = parseComponent Test  pkgName <$> P.condTestSuites gpd
       benches = parseComponent Bench pkgName <$> P.condBenchmarks gpd
       components = maybeToList lib ++ exes ++ tests ++ benches
-  in  Package { packageName = pkgName, components = components }
+  in  Package { packageName = pkgName, packageComponents = components }
 
 parseComponent
   :: (ComponentName -> DependsOnLib -> a)
@@ -135,7 +157,8 @@ data CabalFile = CabalFile
 
 instance FromJSON StackQuery where
   parseJSON (Object o) = 
-    let parseCabalFile (k, Object v) = CabalFile k <$> v .: "path"
+    let parseCabalFile (k, v) = 
+          withObject (T.unpack k) (\v' -> CabalFile k <$> v' .: "path") v
     in
       do 
         Object locals <- o .: "locals"

@@ -42,15 +42,14 @@ import qualified Distribution.Verbosity                 as P
 
 main :: IO ()
 main = do
-  argsOpt <- parseArgs <$> getArgs
+  argsOpt               <- parseArgs <$> getArgs
   (projPath, stackPath) <- case argsOpt of
-                Just args -> pure args
-                Nothing -> die usage
-  cabalFiles <- stackQuery projPath stackPath
-  packageDescriptions <- traverse readGenericPackageDescriptionFromFile cabalFiles
+                            Just args -> pure args
+                            Nothing   -> die usage
+  cabalFiles            <- stackQuery projPath stackPath
+  packageDescriptions   <- traverse readGenericPackageDescriptionFromFile cabalFiles
   let packages = fmap parsePackage packageDescriptions
   putStrLn $ BSL.unpack $ J.encode packages
-  pure ()
 
 -------------------------------------------------------------------
 -- parse cabal files
@@ -162,22 +161,19 @@ stackQuery projPath stackPath =
     process = (proc stackPath ["query"]) { cwd = Just projPath }
 
 newtype StackQuery = StackQuery [CabalFile]
-  deriving Show
 
 data CabalFile = CabalFile
   { name :: Text
   , path :: Text
   }
-  deriving Show
 
 instance FromJSON StackQuery where
-  parseJSON (Object o) = 
+  parseJSON = 
     let parseCabalFile (k, v) = 
           withObject (T.unpack k) (\v' -> CabalFile k <$> v' .: "path") v
     in
-      do 
-        Object locals <- o .: "locals"
-        files         <- traverse parseCabalFile $ HM.toList locals
-        pure $ StackQuery files
-  parseJSON _ = fail "Expected Object for Locals value"
-
+      withObject "root" $ \o ->
+        do 
+          Object locals <- o .: "locals"
+          files         <- traverse parseCabalFile $ HM.toList locals
+          pure $ StackQuery files
